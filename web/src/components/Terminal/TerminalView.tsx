@@ -6,6 +6,7 @@ import { CanvasAddon } from '@xterm/addon-canvas'
 import '@xterm/xterm/css/xterm.css'
 import { ensureBuiltinFontLoaded, getFontProvider } from '@/lib/terminalFont'
 import { getInitialTerminalFontSize } from '@/hooks/useTerminalFontSize'
+import { safeCopyToClipboard } from '@/lib/clipboard'
 
 const GHOSTTY_DEFAULT_THEME = {
     background: '#282c34',
@@ -30,6 +31,24 @@ const GHOSTTY_DEFAULT_THEME = {
     brightMagenta: '#c397d8',
     brightCyan: '#70c0b1',
     brightWhite: '#eaeaea',
+}
+
+function isTerminalCopyShortcut(event: KeyboardEvent): boolean {
+    if (event.altKey || event.key.toLowerCase() !== 'c') {
+        return false
+    }
+    const macCopy = event.metaKey && !event.ctrlKey && !event.shiftKey
+    const terminalCopy = event.ctrlKey && event.shiftKey && !event.metaKey
+    return macCopy || terminalCopy
+}
+
+function isTerminalPasteShortcut(event: KeyboardEvent): boolean {
+    if (event.altKey || event.key.toLowerCase() !== 'v') {
+        return false
+    }
+    const macPaste = event.metaKey && !event.ctrlKey && !event.shiftKey
+    const terminalPaste = event.ctrlKey && event.shiftKey && !event.metaKey
+    return macPaste || terminalPaste
 }
 
 export function TerminalView(props: {
@@ -114,17 +133,68 @@ export function TerminalView(props: {
         window.addEventListener('resize', scheduleSettledFit)
         document.addEventListener('fullscreenchange', scheduleSettledFit)
 
-        terminal.attachCustomKeyEventHandler((event) => {
-            const isCopyShortcut =
-                (event.metaKey || event.ctrlKey) &&
-                !event.altKey &&
-                event.key.toLowerCase() === 'c'
+        let pasteRequestId = 0
+        let nativePasteRequestId = -1
 
-            // Let the browser/xterm copy event handle a selected range. With no
-            // selection, Ctrl-C still reaches the remote shell as SIGINT.
-            if (isCopyShortcut && terminal.hasSelection()) {
+        const handleNativePaste = (event: ClipboardEvent) => {
+            const text = event.clipboardData?.getData('text/plain') ?? ''
+            if (!text) {
+                return
+            }
+            nativePasteRequestId = pasteRequestId
+            event.preventDefault()
+            event.stopPropagation()
+            terminal.paste(text)
+            terminal.focus()
+        }
+        container.addEventListener('paste', handleNativePaste, true)
+
+        terminal.attachCustomKeyEventHandler((event) => {
+            if (event.type !== 'keydown') {
+                return true
+            }
+
+            if (isTerminalCopyShortcut(event)) {
+                const selection = terminal.getSelection()
+                if (selection) {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    void safeCopyToClipboard(selection).catch(() => {
+                        // The browser may deny clipboard access outside a secure
+                        // context. Keep the terminal usable if that happens.
+                    })
+                }
                 return false
             }
+
+            if (isTerminalPasteShortcut(event)) {
+                const requestId = ++pasteRequestId
+
+                // Keep the browser's native paste action available. It carries
+                // clipboardData without requiring Clipboard API permission.
+                // If no paste event arrives, fall back to readText after the
+                // keydown default action has had a chance to run.
+                window.setTimeout(() => {
+                    if (
+                        abortController.signal.aborted ||
+                        nativePasteRequestId === requestId ||
+                        !navigator.clipboard?.readText
+                    ) {
+                        return
+                    }
+                    void navigator.clipboard.readText().then((text) => {
+                        if (!abortController.signal.aborted && text) {
+                            terminal.paste(text)
+                            terminal.focus()
+                        }
+                    }).catch(() => {
+                        // Native paste remains the permission-free fallback.
+                    })
+                }, 0)
+                return false
+            }
+
+            // Plain Ctrl-C and Ctrl-V remain terminal control sequences.
             return true
         })
 
@@ -162,6 +232,7 @@ export function TerminalView(props: {
             observer.disconnect()
             window.removeEventListener('resize', scheduleSettledFit)
             document.removeEventListener('fullscreenchange', scheduleSettledFit)
+            container.removeEventListener('paste', handleNativePaste, true)
             if (fitFrame !== null) {
                 cancelAnimationFrame(fitFrame)
             }

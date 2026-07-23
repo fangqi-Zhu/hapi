@@ -7,6 +7,9 @@ const terminalMocks = vi.hoisted(() => ({
     resizeObserverCallback: null as ResizeObserverCallback | null,
     keyHandler: null as ((event: KeyboardEvent) => boolean) | null,
     hasSelection: vi.fn(() => false),
+    getSelection: vi.fn(() => ''),
+    paste: vi.fn(),
+    focus: vi.fn(),
     terminalOptions: null as Record<string, unknown> | null,
 }))
 
@@ -27,6 +30,9 @@ vi.mock('@xterm/xterm', () => ({
         refresh = vi.fn()
         dispose = vi.fn()
         hasSelection = terminalMocks.hasSelection
+        getSelection = terminalMocks.getSelection
+        paste = terminalMocks.paste
+        focus = terminalMocks.focus
 
         attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {
             terminalMocks.keyHandler = handler
@@ -80,6 +86,8 @@ describe('TerminalView resizing and copy behavior', () => {
         terminalMocks.keyHandler = null
         terminalMocks.resizeObserverCallback = null
         terminalMocks.terminalOptions = null
+        terminalMocks.hasSelection.mockReturnValue(false)
+        terminalMocks.getSelection.mockReturnValue('')
         vi.stubGlobal('ResizeObserver', ResizeObserverMock)
     })
 
@@ -106,7 +114,12 @@ describe('TerminalView resizing and copy behavior', () => {
         })
     })
 
-    it('leaves copy shortcuts to the browser only when text is selected', async () => {
+    it('copies with Cmd-C and Ctrl-Shift-C while preserving plain Ctrl-C', async () => {
+        const writeText = vi.fn(async () => undefined)
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: { writeText }
+        })
         render(<TerminalView />)
 
         await waitFor(() => {
@@ -114,16 +127,73 @@ describe('TerminalView resizing and copy behavior', () => {
         })
 
         terminalMocks.hasSelection.mockReturnValue(true)
+        terminalMocks.getSelection.mockReturnValue('selected output')
         expect(
             terminalMocks.keyHandler?.(
                 new KeyboardEvent('keydown', { key: 'c', metaKey: true })
             )
         ).toBe(false)
+        await waitFor(() => {
+            expect(writeText).toHaveBeenCalledWith('selected output')
+        })
 
-        terminalMocks.hasSelection.mockReturnValue(false)
         expect(
             terminalMocks.keyHandler?.(
                 new KeyboardEvent('keydown', { key: 'c', ctrlKey: true })
+            )
+        ).toBe(true)
+
+        expect(
+            terminalMocks.keyHandler?.(
+                new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, shiftKey: true })
+            )
+        ).toBe(false)
+        await waitFor(() => {
+            expect(writeText).toHaveBeenCalledTimes(2)
+        })
+    })
+
+    it('pastes native clipboard data and falls back to clipboard readText', async () => {
+        const readText = vi.fn(async () => 'fallback paste')
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: { readText }
+        })
+        const rendered = render(<TerminalView />)
+
+        await waitFor(() => {
+            expect(terminalMocks.keyHandler).not.toBeNull()
+        })
+
+        expect(
+            terminalMocks.keyHandler?.(
+                new KeyboardEvent('keydown', { key: 'v', metaKey: true })
+            )
+        ).toBe(false)
+
+        const pasteEvent = new Event('paste', { bubbles: true, cancelable: true })
+        Object.defineProperty(pasteEvent, 'clipboardData', {
+            value: { getData: () => 'native paste' }
+        })
+        rendered.container.firstElementChild?.dispatchEvent(pasteEvent)
+
+        expect(terminalMocks.paste).toHaveBeenCalledWith('native paste')
+        await new Promise((resolve) => window.setTimeout(resolve, 0))
+        expect(readText).not.toHaveBeenCalled()
+
+        expect(
+            terminalMocks.keyHandler?.(
+                new KeyboardEvent('keydown', { key: 'v', ctrlKey: true, shiftKey: true })
+            )
+        ).toBe(false)
+        await waitFor(() => {
+            expect(readText).toHaveBeenCalledTimes(1)
+            expect(terminalMocks.paste).toHaveBeenCalledWith('fallback paste')
+        })
+
+        expect(
+            terminalMocks.keyHandler?.(
+                new KeyboardEvent('keydown', { key: 'v', ctrlKey: true })
             )
         ).toBe(true)
     })
