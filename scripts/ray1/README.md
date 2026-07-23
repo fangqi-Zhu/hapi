@@ -8,9 +8,11 @@ The customization is deliberately narrow:
 - the Terminal header has a native browser fullscreen toggle;
 - xterm refits after container, window, and fullscreen changes;
 - browser copy remains available when xterm has a selection;
-- the Paste button remains available;
-- HAPI terminals attach to the persistent `hapi-ray1` Zellij session in
-  `/workspace`, with Zellij mouse handling disabled and copy-on-select enabled;
+- the remote Terminal uses Ghostty's default background, foreground, and
+  16-color palette, without the mobile quick-input button bar;
+- HAPI terminals open a plain Bash shell in `/workspace`, so an existing
+  Zellij session can be attached directly without nesting it inside another
+  Zellij client;
 - the embedded custom web build can be served from the existing
   `relay.hapi.run` tunnel with `HAPI_SERVE_WEB_IN_RELAY=1`.
 

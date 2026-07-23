@@ -7,13 +7,19 @@ const terminalMocks = vi.hoisted(() => ({
     resizeObserverCallback: null as ResizeObserverCallback | null,
     keyHandler: null as ((event: KeyboardEvent) => boolean) | null,
     hasSelection: vi.fn(() => false),
+    terminalOptions: null as Record<string, unknown> | null,
 }))
 
 vi.mock('@xterm/xterm', () => ({
     Terminal: class {
         cols = 120
         rows = 40
-        options: Record<string, unknown> = {}
+        options: Record<string, unknown>
+
+        constructor(options: Record<string, unknown>) {
+            this.options = options
+            terminalMocks.terminalOptions = options
+        }
 
         loadAddon = vi.fn()
         open = vi.fn()
@@ -73,6 +79,7 @@ describe('TerminalView resizing and copy behavior', () => {
         vi.clearAllMocks()
         terminalMocks.keyHandler = null
         terminalMocks.resizeObserverCallback = null
+        terminalMocks.terminalOptions = null
         vi.stubGlobal('ResizeObserver', ResizeObserverMock)
     })
 
@@ -119,5 +126,34 @@ describe('TerminalView resizing and copy behavior', () => {
                 new KeyboardEvent('keydown', { key: 'c', ctrlKey: true })
             )
         ).toBe(true)
+    })
+
+    it('uses the Ghostty default terminal palette', async () => {
+        render(<TerminalView />)
+
+        await waitFor(() => {
+            expect(terminalMocks.terminalOptions).not.toBeNull()
+        })
+
+        expect(terminalMocks.terminalOptions?.theme).toMatchObject({
+            background: '#282c34',
+            foreground: '#ffffff',
+            black: '#1d1f21',
+            red: '#cc6666',
+            green: '#b5bd68',
+            yellow: '#f0c674',
+            blue: '#81a2be',
+            magenta: '#b294bb',
+            cyan: '#8abeb7',
+            white: '#c5c8c6',
+            brightBlack: '#666666',
+            brightRed: '#d54e53',
+            brightGreen: '#b9ca4a',
+            brightYellow: '#e7c547',
+            brightBlue: '#7aa6da',
+            brightMagenta: '#c397d8',
+            brightCyan: '#70c0b1',
+            brightWhite: '#eaeaea',
+        })
     })
 })

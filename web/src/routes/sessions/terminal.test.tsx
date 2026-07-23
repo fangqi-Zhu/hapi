@@ -55,12 +55,6 @@ vi.mock('@/hooks/useTerminalSocket', () => ({
     useTerminalSocket: () => terminalSocketState
 }))
 
-vi.mock('@/hooks/useLongPress', () => ({
-    useLongPress: ({ onClick }: { onClick: () => void }) => ({
-        onClick
-    })
-}))
-
 vi.mock('@/components/Terminal/TerminalView', () => ({
     TerminalView: () => <div data-testid="terminal-view" />
 }))
@@ -73,42 +67,18 @@ function renderWithProviders() {
     )
 }
 
-describe('TerminalPage paste behavior', () => {
+describe('TerminalPage controls', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         onExitHandler = null
     })
 
-    it('does not open manual paste dialog when clipboard text is empty', async () => {
-        const readText = vi.fn(async () => '')
-        Object.defineProperty(navigator, 'clipboard', {
-            configurable: true,
-            value: { readText }
-        })
-
+    it('does not render the bottom paste and quick-input button bar', () => {
         renderWithProviders()
-        fireEvent.click(screen.getAllByRole('button', { name: 'Paste' })[0])
 
-        await waitFor(() => {
-            expect(readText).toHaveBeenCalledTimes(1)
-        })
-        expect(writeMock).not.toHaveBeenCalled()
-        expect(screen.queryByText('Paste input')).not.toBeInTheDocument()
-    })
-
-    it('opens manual paste dialog when clipboard read fails', async () => {
-        const readText = vi.fn(async () => {
-            throw new Error('blocked')
-        })
-        Object.defineProperty(navigator, 'clipboard', {
-            configurable: true,
-            value: { readText }
-        })
-
-        renderWithProviders()
-        fireEvent.click(screen.getAllByRole('button', { name: 'Paste' })[0])
-
-        expect(await screen.findByText('Paste input')).toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Paste' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Escape' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Control' })).not.toBeInTheDocument()
     })
 })
 

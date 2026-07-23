@@ -14,6 +14,6 @@ export COLORTERM="${COLORTERM:-truecolor}"
 
 cd /workspace
 
-exec /root/.local/bin/zellij \
-    --config /root/.config/hapi/zellij.kdl \
-    attach --create hapi-ray1
+# Start outside Zellij so attaching an existing session never creates a nested
+# client that constrains the session to the browser terminal's dimensions.
+exec /bin/bash -i

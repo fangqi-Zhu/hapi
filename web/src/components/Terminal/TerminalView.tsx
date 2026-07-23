@@ -7,12 +7,29 @@ import '@xterm/xterm/css/xterm.css'
 import { ensureBuiltinFontLoaded, getFontProvider } from '@/lib/terminalFont'
 import { getInitialTerminalFontSize } from '@/hooks/useTerminalFontSize'
 
-function resolveThemeColors(): { background: string; foreground: string; selectionBackground: string } {
-    const styles = getComputedStyle(document.documentElement)
-    const background = styles.getPropertyValue('--app-bg').trim() || '#000000'
-    const foreground = styles.getPropertyValue('--app-fg').trim() || '#ffffff'
-    const selectionBackground = styles.getPropertyValue('--app-subtle-bg').trim() || 'rgba(255, 255, 255, 0.2)'
-    return { background, foreground, selectionBackground }
+const GHOSTTY_DEFAULT_THEME = {
+    background: '#282c34',
+    foreground: '#ffffff',
+    cursor: '#ffffff',
+    cursorAccent: '#282c34',
+    selectionBackground: '#ffffff',
+    selectionForeground: '#282c34',
+    black: '#1d1f21',
+    red: '#cc6666',
+    green: '#b5bd68',
+    yellow: '#f0c674',
+    blue: '#81a2be',
+    magenta: '#b294bb',
+    cyan: '#8abeb7',
+    white: '#c5c8c6',
+    brightBlack: '#666666',
+    brightRed: '#d54e53',
+    brightGreen: '#b9ca4a',
+    brightYellow: '#e7c547',
+    brightBlue: '#7aa6da',
+    brightMagenta: '#c397d8',
+    brightCyan: '#70c0b1',
+    brightWhite: '#eaeaea',
 }
 
 export function TerminalView(props: {
@@ -40,17 +57,11 @@ export function TerminalView(props: {
 
         const fontProvider = getFontProvider()
         const fontSize = getInitialTerminalFontSize()
-        const { background, foreground, selectionBackground } = resolveThemeColors()
         const terminal = new Terminal({
             cursorBlink: true,
             fontFamily: fontProvider.getFontFamily(),
             fontSize,
-            theme: {
-                background,
-                foreground,
-                cursor: foreground,
-                selectionBackground
-            },
+            theme: GHOSTTY_DEFAULT_THEME,
             convertEol: true,
             customGlyphs: true
         })

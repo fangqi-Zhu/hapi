@@ -52,8 +52,9 @@ bun run build:single-exe
 
 ## Fangqi ray1 custom build
 
-The `custom/ray1-terminal` branch adds fullscreen remote Terminal support and
-persistent Zellij copy/paste behavior for ray1. See
+The `custom/ray1-terminal` branch adds fullscreen remote Terminal support,
+Ghostty default colors, browser copy behavior, and non-nested Zellij access
+for ray1. See
 [`scripts/ray1/README.md`](scripts/ray1/README.md) for build, install,
 one-command restore, and rollback instructions.
 
