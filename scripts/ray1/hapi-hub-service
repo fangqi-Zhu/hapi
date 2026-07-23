@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export PATH="/root/.local/bin:/root/bin:/root/.local/node/bin:/usr/local/bin:/usr/bin:/bin"
+export HAPI_SERVE_WEB_IN_RELAY="1"
+export HAPI_RELAY_FORCE_TCP="1"
+
+exec /root/.local/bin/hapi hub --relay

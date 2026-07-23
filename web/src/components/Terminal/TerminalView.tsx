@@ -63,13 +63,59 @@ export function TerminalView(props: {
         terminal.loadAddon(canvasAddon)
         terminal.open(container)
 
-        const observer = new ResizeObserver(() => {
-            requestAnimationFrame(() => {
-                fitAddon.fit()
-                onResizeRef.current?.(terminal.cols, terminal.rows)
+        let fitFrame: number | null = null
+        let settleFrame: number | null = null
+
+        const fitTerminal = () => {
+            if (abortController.signal.aborted) return
+            fitAddon.fit()
+            onResizeRef.current?.(terminal.cols, terminal.rows)
+        }
+
+        const scheduleFit = () => {
+            if (fitFrame !== null) {
+                cancelAnimationFrame(fitFrame)
+            }
+            fitFrame = requestAnimationFrame(() => {
+                fitFrame = null
+                fitTerminal()
             })
-        })
+        }
+
+        // Fullscreen transitions and browser chrome changes can settle one frame
+        // after the first resize notification. Fit once immediately and once
+        // after layout has settled so the PTY always receives the final rows/cols.
+        const scheduleSettledFit = () => {
+            scheduleFit()
+            if (settleFrame !== null) {
+                cancelAnimationFrame(settleFrame)
+            }
+            settleFrame = requestAnimationFrame(() => {
+                settleFrame = requestAnimationFrame(() => {
+                    settleFrame = null
+                    scheduleFit()
+                })
+            })
+        }
+
+        const observer = new ResizeObserver(scheduleFit)
         observer.observe(container)
+        window.addEventListener('resize', scheduleSettledFit)
+        document.addEventListener('fullscreenchange', scheduleSettledFit)
+
+        terminal.attachCustomKeyEventHandler((event) => {
+            const isCopyShortcut =
+                (event.metaKey || event.ctrlKey) &&
+                !event.altKey &&
+                event.key.toLowerCase() === 'c'
+
+            // Let the browser/xterm copy event handle a selected range. With no
+            // selection, Ctrl-C still reaches the remote shell as SIGINT.
+            if (isCopyShortcut && terminal.hasSelection()) {
+                return false
+            }
+            return true
+        })
 
         const refreshFont = (forceRemeasure = false) => {
             if (abortController.signal.aborted) return
@@ -83,8 +129,7 @@ export function TerminalView(props: {
                     if (terminal.rows > 0) {
                         terminal.refresh(0, terminal.rows - 1)
                     }
-                    fitAddon.fit()
-                    onResizeRef.current?.(terminal.cols, terminal.rows)
+                    scheduleFit()
                 })
                 return
             }
@@ -93,8 +138,7 @@ export function TerminalView(props: {
             if (terminal.rows > 0) {
                 terminal.refresh(0, terminal.rows - 1)
             }
-            fitAddon.fit()
-            onResizeRef.current?.(terminal.cols, terminal.rows)
+            scheduleFit()
         }
 
         void ensureBuiltinFontLoaded().then(loaded => {
@@ -105,16 +149,21 @@ export function TerminalView(props: {
         // Cleanup on abort
         abortController.signal.addEventListener('abort', () => {
             observer.disconnect()
+            window.removeEventListener('resize', scheduleSettledFit)
+            document.removeEventListener('fullscreenchange', scheduleSettledFit)
+            if (fitFrame !== null) {
+                cancelAnimationFrame(fitFrame)
+            }
+            if (settleFrame !== null) {
+                cancelAnimationFrame(settleFrame)
+            }
             fitAddon.dispose()
             webLinksAddon.dispose()
             canvasAddon.dispose()
             terminal.dispose()
         })
 
-        requestAnimationFrame(() => {
-            fitAddon.fit()
-            onResizeRef.current?.(terminal.cols, terminal.rows)
-        })
+        scheduleSettledFit()
         onMountRef.current?.(terminal)
 
         return () => abortController.abort()

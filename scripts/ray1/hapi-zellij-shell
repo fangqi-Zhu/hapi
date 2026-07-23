@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# HAPI invokes $SHELL without arguments for the web terminal. Preserve normal
+# bash behavior for tools that invoke the configured shell with -c or -lc.
+if [ "$#" -gt 0 ]; then
+    exec /bin/bash "$@"
+fi
+
+export PATH="/root/.local/bin:/root/bin:/root/.local/node/bin:/usr/local/bin:/usr/bin:/bin"
+export SHELL="/bin/bash"
+export TERM="${TERM:-xterm-256color}"
+export COLORTERM="${COLORTERM:-truecolor}"
+
+cd /workspace
+
+exec /root/.local/bin/zellij \
+    --config /root/.config/hapi/zellij.kdl \
+    attach --create hapi-ray1

@@ -1,4 +1,5 @@
 import type { ChildProcess } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import spawn from 'cross-spawn';
 
 export const isWindows = (): boolean => process.platform === 'win32';
@@ -10,10 +11,27 @@ export function isProcessAlive(pid: number): boolean {
 
   try {
     process.kill(pid, 0);
-    return true;
   } catch {
     return false;
   }
+
+  // kill(pid, 0) succeeds for zombies. Containers whose PID 1 does not reap
+  // promptly can otherwise treat an already-exited runner as alive forever.
+  if (process.platform === 'linux') {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const commandEnd = stat.lastIndexOf(')');
+      const state = commandEnd >= 0 ? stat.charAt(commandEnd + 2) : '';
+      if (state === 'Z' || state === 'X') {
+        return false;
+      }
+    } catch {
+      // The process may have disappeared after kill(pid, 0); the next poll
+      // will observe that. Fall back to the portable result for other errors.
+    }
+  }
+
+  return true;
 }
 
 // ponytail: ps -p is cheap and avoids PID-reuse false positives after OS upgrades/reboots

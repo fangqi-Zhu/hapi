@@ -190,6 +190,7 @@ export default function TerminalPage() {
     const { session } = useSession(api, sessionId)
     const terminalSupported = isRemoteTerminalSupported(session?.metadata)
     const terminalId = useMemo(() => randomId(), [sessionId])
+    const pageRef = useRef<HTMLDivElement | null>(null)
     const terminalRef = useRef<Terminal | null>(null)
     const inputDisposableRef = useRef<{ dispose: () => void } | null>(null)
     const connectOnceRef = useRef(false)
@@ -201,6 +202,7 @@ export default function TerminalPage() {
     const [altActive, setAltActive] = useState(false)
     const [pasteDialogOpen, setPasteDialogOpen] = useState(false)
     const [manualPasteText, setManualPasteText] = useState('')
+    const [isFullscreen, setIsFullscreen] = useState(false)
 
     const {
         state: terminalState,
@@ -240,6 +242,17 @@ export default function TerminalPage() {
     useEffect(() => {
         modifierStateRef.current = { ctrl: ctrlActive, alt: altActive }
     }, [ctrlActive, altActive])
+
+    useEffect(() => {
+        const handleFullscreenChange = () => {
+            setIsFullscreen(document.fullscreenElement === pageRef.current)
+        }
+        document.addEventListener('fullscreenchange', handleFullscreenChange)
+        handleFullscreenChange()
+        return () => {
+            document.removeEventListener('fullscreenchange', handleFullscreenChange)
+        }
+    }, [])
 
     const resetModifiers = useCallback(() => {
         setCtrlActive(false)
@@ -411,6 +424,26 @@ export default function TerminalPage() {
         [quickInputDisabled]
     )
 
+    const handleFullscreenToggle = useCallback(async () => {
+        const page = pageRef.current
+        if (!page) {
+            return
+        }
+
+        try {
+            if (document.fullscreenElement) {
+                await document.exitFullscreen()
+            } else {
+                await page.requestFullscreen()
+            }
+        } catch {
+            // Fullscreen can be denied by browser policy. Keep the terminal
+            // usable and focused when that happens.
+        } finally {
+            terminalRef.current?.focus()
+        }
+    }, [])
+
     if (!session) {
         return (
             <div className="flex h-full items-center justify-center">
@@ -428,9 +461,13 @@ export default function TerminalPage() {
           : null
 
     return (
-        <div className="flex h-full min-h-0 flex-col">
+        <div
+            ref={pageRef}
+            className="flex h-full min-h-0 flex-col bg-[var(--app-bg)]"
+            data-testid="terminal-page"
+        >
             <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
-                <div className="mx-auto w-full max-w-content flex items-center gap-2 p-3 border-b border-[var(--app-border)]">
+                <div className="flex w-full items-center gap-2 border-b border-[var(--app-border)] px-3 py-2">
                     <button
                         type="button"
                         onClick={goBack}
@@ -442,20 +479,32 @@ export default function TerminalPage() {
                         <div className="truncate font-semibold">Terminal</div>
                         <div className="truncate text-xs text-[var(--app-hint)]">{subtitle}</div>
                     </div>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            void handleFullscreenToggle()
+                        }}
+                        className="flex h-8 items-center justify-center gap-1.5 rounded-md border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-2.5 text-xs font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-button)] sm:text-sm"
+                        aria-label={isFullscreen ? t('terminal.fullscreen.exit') : t('terminal.fullscreen.enter')}
+                        title={isFullscreen ? t('terminal.fullscreen.exit') : t('terminal.fullscreen.enter')}
+                    >
+                        <span aria-hidden="true">{isFullscreen ? '⊡' : '⛶'}</span>
+                        <span>{isFullscreen ? t('terminal.fullscreen.exit') : t('terminal.fullscreen.enter')}</span>
+                    </button>
                     <ConnectionIndicator status={status} />
                 </div>
             </div>
 
             {session.active ? null : (
                 <div className="px-3 pt-3">
-                    <div className="mx-auto w-full max-w-content rounded-md bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">
+                    <div className="w-full rounded-md bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">
                         Session is inactive. Terminal is unavailable.
                     </div>
                 </div>
             )}
 
             {errorMessage ? (
-                <div className="mx-auto w-full max-w-content px-3 pt-3">
+                <div className="w-full px-3 pt-3">
                     <div className="rounded-md border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] p-3 text-xs text-[var(--app-badge-error-text)]">
                         {errorMessage}
                     </div>
@@ -463,7 +512,7 @@ export default function TerminalPage() {
             ) : null}
 
             {exitInfo ? (
-                <div className="mx-auto w-full max-w-content px-3 pt-3">
+                <div className="w-full px-3 pt-3">
                     <div className="rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-3 text-xs text-[var(--app-hint)]">
                         Terminal exited{exitInfo.code !== null ? ` with code ${exitInfo.code}` : ''}
                         {exitInfo.signal ? ` (${exitInfo.signal})` : ''}.
@@ -472,7 +521,7 @@ export default function TerminalPage() {
             ) : null}
 
             <div className="flex-1 min-h-0 overflow-hidden bg-[var(--app-bg)]">
-                <div className="mx-auto h-full w-full max-w-content p-3">
+                <div className="h-full w-full p-2">
                     {terminalSupported ? (
                         <TerminalView onMount={handleTerminalMount} onResize={handleResize} className="h-full w-full" />
                     ) : (
@@ -484,15 +533,15 @@ export default function TerminalPage() {
             </div>
 
             <div className="bg-[var(--app-bg)] border-t border-[var(--app-border)] pb-[env(safe-area-inset-bottom)]">
-                <div className="mx-auto w-full max-w-content px-3">
-                    <div className="flex flex-col gap-2 py-2">
+                <div className="w-full px-2">
+                    <div className="flex flex-col gap-2 py-2 sm:grid sm:grid-cols-[minmax(7rem,auto)_1fr_1fr]">
                         <button
                             type="button"
                             onClick={() => {
                                 void handlePasteAction()
                             }}
                             disabled={quickInputDisabled}
-                            className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-3 py-2 text-sm font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-button)] disabled:cursor-not-allowed disabled:opacity-50"
+                            className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-3 py-1.5 text-sm font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-button)] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                             {t('button.paste')}
                         </button>

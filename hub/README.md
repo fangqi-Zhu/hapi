@@ -40,6 +40,7 @@ See `src/configuration.ts` for all options.
 - `HAPI_RELAY_API` - Relay API domain (default: relay.hapi.run).
 - `HAPI_RELAY_AUTH` - Relay auth key (default: hapi).
 - `HAPI_RELAY_FORCE_TCP` - Force TCP relay mode (true/1).
+- `HAPI_SERVE_WEB_IN_RELAY` - Serve the binary's embedded web app from the relay origin instead of redirecting to app.hapi.run (true/1, default: false).
 - `VAPID_SUBJECT` - Contact email/URL for Web Push.
 
 ## Running

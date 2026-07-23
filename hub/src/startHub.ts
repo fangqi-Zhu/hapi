@@ -18,6 +18,7 @@ import { ServerChanChannel } from './serverchan/channel'
 import QRCode from 'qrcode'
 import type { Server as BunServer } from 'bun'
 import type { WebSocketData } from '@socket.io/bun-engine'
+import { buildRelayAccessUrl, isEmbeddedRelayWebEnabled } from './relayWeb'
 
 /** Format config source for logging */
 function formatSource(source: ConfigSource | 'generated'): string {
@@ -111,6 +112,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     const relayApiDomain = process.env.HAPI_RELAY_API || 'relay.hapi.run'
     const relayFlag = resolveRelayFlag(options.args ?? process.argv)
     const officialWebUrl = process.env.HAPI_OFFICIAL_WEB_URL || 'https://app.hapi.run'
+    const serveEmbeddedRelayWeb = isEmbeddedRelayWebEnabled(process.env.HAPI_SERVE_WEB_IN_RELAY)
     const config = await createConfiguration()
     const baseCorsOrigins = normalizeOrigins(config.corsOrigins)
     const relayCorsOrigin = normalizeOrigin(officialWebUrl)
@@ -160,6 +162,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     // Display tunnel status
     if (relayFlag.enabled) {
         console.log(`[Hub] Tunnel: enabled (${relayFlag.source}), API: ${relayApiDomain}`)
+        console.log(`[Hub] Relay web: ${serveEmbeddedRelayWeb ? 'embedded' : 'official app'}`)
     } else {
         console.log(`[Hub] Tunnel: disabled (${relayFlag.source})`)
     }
@@ -230,7 +233,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         vapidPublicKey: vapidKeys.publicKey,
         socketEngine: socketServer.engine,
         corsOrigins,
-        relayMode: relayFlag.enabled,
+        relayMode: relayFlag.enabled && !serveEmbeddedRelayWeb,
         officialWebUrl
     })
 
@@ -273,12 +276,12 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
 
             console.log('[Web] Public: ' + tunnelUrl)
 
-            // Generate direct access link with hub and token
-            const params = new URLSearchParams({
-                hub: tunnelUrl,
-                token: config.cliApiToken
+            const directAccessUrl = buildRelayAccessUrl({
+                tunnelUrl,
+                officialWebUrl,
+                token: config.cliApiToken,
+                serveEmbeddedWeb: serveEmbeddedRelayWeb,
             })
-            const directAccessUrl = `${officialWebUrl}/?${params.toString()}`
 
             console.log('')
             console.log('Open in browser:')

@@ -320,6 +320,8 @@ export default {
   'terminal.stdout': '标准输出',
   'terminal.stderr': '标准错误',
   'terminal.unsupportedWindows': '此主机暂不支持远程终端。',
+  'terminal.fullscreen.enter': '进入全屏',
+  'terminal.fullscreen.exit': '退出全屏',
   'terminal.paste.fallbackTitle': '粘贴输入',
   'terminal.paste.fallbackDescription': '无法读取剪贴板，请在下方粘贴文本。',
   'terminal.paste.placeholder': '在此粘贴终端输入…',

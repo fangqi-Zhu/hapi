@@ -1,0 +1,11 @@
+simplified_ui true
+pane_frames true
+default_layout "compact"
+default_shell "/bin/bash"
+default_cwd "/workspace"
+mouse_mode false
+copy_clipboard "system"
+copy_on_select true
+show_startup_tips false
+show_release_notes false
+on_force_close "detach"

@@ -316,6 +316,8 @@ export default {
   'terminal.stdout': 'Stdout',
   'terminal.stderr': 'Stderr',
   'terminal.unsupportedWindows': 'Remote terminal is unavailable on this host.',
+  'terminal.fullscreen.enter': 'Enter full screen',
+  'terminal.fullscreen.exit': 'Exit full screen',
   'terminal.paste.fallbackTitle': 'Paste input',
   'terminal.paste.fallbackDescription': 'Clipboard read is unavailable. Paste your text below.',
   'terminal.paste.placeholder': 'Paste terminal input here…',

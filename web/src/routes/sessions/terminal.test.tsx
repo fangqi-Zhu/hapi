@@ -137,3 +137,57 @@ describe('TerminalPage exit behavior', () => {
         )
     })
 })
+
+describe('TerminalPage fullscreen behavior', () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        onExitHandler = null
+    })
+
+    it('enters and exits fullscreen from the terminal header', async () => {
+        let fullscreenElement: Element | null = null
+        const requestFullscreen = vi.fn(async function (this: HTMLElement) {
+            fullscreenElement = this
+            document.dispatchEvent(new Event('fullscreenchange'))
+        })
+        const exitFullscreen = vi.fn(async () => {
+            fullscreenElement = null
+            document.dispatchEvent(new Event('fullscreenchange'))
+        })
+
+        Object.defineProperty(document, 'fullscreenElement', {
+            configurable: true,
+            get: () => fullscreenElement,
+        })
+        Object.defineProperty(HTMLElement.prototype, 'requestFullscreen', {
+            configurable: true,
+            value: requestFullscreen,
+        })
+        Object.defineProperty(document, 'exitFullscreen', {
+            configurable: true,
+            value: exitFullscreen,
+        })
+
+        renderWithProviders()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Enter full screen' }))
+        await waitFor(() => {
+            expect(requestFullscreen).toHaveBeenCalledTimes(1)
+            expect(screen.getByRole('button', { name: 'Exit full screen' })).toBeInTheDocument()
+        })
+
+        fireEvent.click(screen.getByRole('button', { name: 'Exit full screen' }))
+        await waitFor(() => {
+            expect(exitFullscreen).toHaveBeenCalledTimes(1)
+            expect(screen.getByRole('button', { name: 'Enter full screen' })).toBeInTheDocument()
+        })
+    })
+
+    it('does not constrain the terminal viewport to the chat content width', () => {
+        renderWithProviders()
+
+        const terminalViewport = screen.getByTestId('terminal-view').parentElement
+        expect(terminalViewport).not.toBeNull()
+        expect(terminalViewport?.className).not.toContain('max-w-content')
+    })
+})

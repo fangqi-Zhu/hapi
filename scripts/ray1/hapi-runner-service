@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export PATH="/root/.local/bin:/root/bin:/root/.local/node/bin:/usr/local/bin:/usr/bin:/bin"
+export SHELL="/root/bin/hapi-zellij-shell"
+export HAPI_HOSTNAME="ray1"
+export HAPI_TERMINAL_IDLE_TIMEOUT_MS="28800000"
+
+exec /root/.local/bin/hapi runner start-sync --workspace-root /workspace

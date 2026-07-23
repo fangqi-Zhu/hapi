@@ -50,6 +50,13 @@ bun install
 bun run build:single-exe
 ```
 
+## Fangqi ray1 custom build
+
+The `custom/ray1-terminal` branch adds fullscreen remote Terminal support and
+persistent Zellij copy/paste behavior for ray1. See
+[`scripts/ray1/README.md`](scripts/ray1/README.md) for build, install,
+one-command restore, and rollback instructions.
+
 ## Credits
 
 HAPI means "哈皮" a Chinese transliteration of [Happy](https://github.com/slopus/happy). Great credit to the original project.
