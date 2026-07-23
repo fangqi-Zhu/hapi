@@ -33,6 +33,36 @@ const GHOSTTY_DEFAULT_THEME = {
     brightWhite: '#eaeaea',
 }
 
+const MAX_OSC52_BASE64_LENGTH = 4 * 1024 * 1024
+
+function decodeOsc52Clipboard(data: string): string | null {
+    const separator = data.indexOf(';')
+    if (separator < 0) {
+        return null
+    }
+
+    const selection = data.slice(0, separator)
+    const payload = data.slice(separator + 1)
+    if (
+        !/^[cpsq0-7]*$/.test(selection) ||
+        !payload ||
+        payload === '?' ||
+        payload.length > MAX_OSC52_BASE64_LENGTH ||
+        !/^[A-Za-z0-9+/]*={0,2}$/.test(payload)
+    ) {
+        return null
+    }
+
+    try {
+        const paddedPayload = payload.padEnd(Math.ceil(payload.length / 4) * 4, '=')
+        const binary = atob(paddedPayload)
+        const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
+        return new TextDecoder().decode(bytes)
+    } catch {
+        return null
+    }
+}
+
 function isTerminalCopyShortcut(event: KeyboardEvent): boolean {
     if (event.altKey || event.key.toLowerCase() !== 'c') {
         return false
@@ -140,10 +170,25 @@ export function TerminalView(props: {
         let nativeCopyRequestId = -1
         let pasteRequestId = 0
         let nativePasteRequestId = -1
+        let remoteClipboardText = ''
         const handledClipboardKeyEvents = new WeakSet<KeyboardEvent>()
+        const getCopyText = () => terminal.getSelection() || remoteClipboardText
+
+        const osc52Disposable = terminal.parser.registerOscHandler(52, (data) => {
+            const text = decodeOsc52Clipboard(data)
+            if (text === null) {
+                return false
+            }
+
+            remoteClipboardText = text
+            // Do not let arbitrary terminal output overwrite the system
+            // clipboard. Store the zellij/tmux selection and require the
+            // user's normal Cmd-C action to copy it.
+            return true
+        })
 
         const handleNativeCopy = (event: ClipboardEvent) => {
-            const selection = terminal.getSelection()
+            const selection = getCopyText()
             if (!selection || !event.clipboardData) {
                 return
             }
@@ -171,7 +216,7 @@ export function TerminalView(props: {
 
             if (isTerminalCopyShortcut(event)) {
                 handledClipboardKeyEvents.add(event)
-                const selection = terminal.getSelection()
+                const selection = getCopyText()
                 if (!selection) {
                     return
                 }
@@ -291,6 +336,7 @@ export function TerminalView(props: {
             fitAddon.dispose()
             webLinksAddon.dispose()
             canvasAddon.dispose()
+            osc52Disposable.dispose()
             terminal.dispose()
         })
 

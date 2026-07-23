@@ -6,6 +6,8 @@ const terminalMocks = vi.hoisted(() => ({
     fit: vi.fn(),
     resizeObserverCallback: null as ResizeObserverCallback | null,
     keyHandler: null as ((event: KeyboardEvent) => boolean) | null,
+    oscHandler: null as ((data: string) => boolean | Promise<boolean>) | null,
+    oscDispose: vi.fn(),
     hasSelection: vi.fn(() => false),
     getSelection: vi.fn(() => ''),
     paste: vi.fn(),
@@ -33,6 +35,17 @@ vi.mock('@xterm/xterm', () => ({
         getSelection = terminalMocks.getSelection
         paste = terminalMocks.paste
         focus = terminalMocks.focus
+        parser = {
+            registerOscHandler: (
+                ident: number,
+                handler: (data: string) => boolean | Promise<boolean>
+            ) => {
+                if (ident === 52) {
+                    terminalMocks.oscHandler = handler
+                }
+                return { dispose: terminalMocks.oscDispose }
+            }
+        }
 
         attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {
             terminalMocks.keyHandler = handler
@@ -84,6 +97,7 @@ describe('TerminalView resizing and copy behavior', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         terminalMocks.keyHandler = null
+        terminalMocks.oscHandler = null
         terminalMocks.resizeObserverCallback = null
         terminalMocks.terminalOptions = null
         terminalMocks.hasSelection.mockReturnValue(false)
@@ -167,6 +181,32 @@ describe('TerminalView resizing and copy behavior', () => {
         expect(setData).toHaveBeenCalledWith('text/plain', 'native selected output')
         expect(copyEvent.defaultPrevented).toBe(true)
         expect(terminalMocks.focus).toHaveBeenCalled()
+    })
+
+    it('copies zellij OSC52 selections and reuses them for Cmd-C', async () => {
+        const rendered = render(<TerminalView />)
+
+        await waitFor(() => {
+            expect(terminalMocks.oscHandler).not.toBeNull()
+        })
+
+        const selection = 'selected directly in zellij：中文'
+        const encodedSelection = btoa(
+            String.fromCharCode(...new TextEncoder().encode(selection))
+        )
+        expect(
+            await terminalMocks.oscHandler?.(`c;${encodedSelection}`)
+        ).toBe(true)
+
+        const setData = vi.fn()
+        const copyEvent = new Event('copy', { bubbles: true, cancelable: true })
+        Object.defineProperty(copyEvent, 'clipboardData', {
+            value: { setData }
+        })
+        rendered.container.firstElementChild?.dispatchEvent(copyEvent)
+
+        expect(setData).toHaveBeenCalledWith('text/plain', selection)
+        expect(copyEvent.defaultPrevented).toBe(true)
     })
 
     it('pastes native clipboard data and falls back to clipboard readText', async () => {
