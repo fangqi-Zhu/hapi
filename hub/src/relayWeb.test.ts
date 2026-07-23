@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'bun:test'
-import { buildRelayAccessUrl, isEmbeddedRelayWebEnabled } from './relayWeb'
+import {
+    buildRelayAccessUrl,
+    buildRelayOriginPattern,
+    isEmbeddedRelayWebEnabled
+} from './relayWeb'
 
 describe('embedded relay web mode', () => {
     it('accepts the documented true values', () => {
@@ -19,6 +23,16 @@ describe('embedded relay web mode', () => {
         })
 
         expect(url).toBe('https://example.relay.hapi.run/?token=secret+token')
+    })
+
+    it('allows only subdomains of the configured relay API origin', () => {
+        const pattern = buildRelayOriginPattern('relay.hapi.run')
+
+        expect(pattern.test('https://abc123.relay.hapi.run')).toBe(true)
+        expect(pattern.test('https://abc-123.relay.hapi.run')).toBe(true)
+        expect(pattern.test('https://relay.hapi.run')).toBe(false)
+        expect(pattern.test('https://abc123.relay.hapi.run.evil.example')).toBe(false)
+        expect(pattern.test('http://abc123.relay.hapi.run')).toBe(false)
     })
 
     it('keeps the official web URL behavior by default', () => {

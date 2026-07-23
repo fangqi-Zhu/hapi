@@ -18,7 +18,11 @@ import { ServerChanChannel } from './serverchan/channel'
 import QRCode from 'qrcode'
 import type { Server as BunServer } from 'bun'
 import type { WebSocketData } from '@socket.io/bun-engine'
-import { buildRelayAccessUrl, isEmbeddedRelayWebEnabled } from './relayWeb'
+import {
+    buildRelayAccessUrl,
+    buildRelayOriginPattern,
+    isEmbeddedRelayWebEnabled
+} from './relayWeb'
 
 /** Format config source for logging */
 function formatSource(source: ConfigSource | 'generated'): string {
@@ -119,6 +123,9 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     const corsOrigins = relayFlag.enabled
         ? mergeCorsOrigins(baseCorsOrigins, relayCorsOrigin ? [relayCorsOrigin] : [])
         : baseCorsOrigins
+    const corsOriginPatterns = relayFlag.enabled && serveEmbeddedRelayWeb
+        ? [buildRelayOriginPattern(relayApiDomain)]
+        : []
 
     // Display CLI API token information
     if (config.cliApiTokenIsNew) {
@@ -180,6 +187,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         store,
         jwtSecret,
         corsOrigins,
+        corsOriginPatterns,
         getSession: (sessionId) => {
             if (syncEngine) {
                 return syncEngine.getSession(sessionId) ?? null

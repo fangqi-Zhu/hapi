@@ -35,6 +35,7 @@ export type SocketServerDeps = {
     store: Store
     jwtSecret: Uint8Array
     corsOrigins?: string[]
+    corsOriginPatterns?: RegExp[]
     getSession?: (sessionId: string) => { active: boolean; namespace: string } | null
     onWebappEvent?: (event: SyncEvent) => void
     onSessionAlive?: (payload: { sid: string; time: number; thinking?: boolean; mode?: 'local' | 'remote' }) => void
@@ -54,8 +55,11 @@ export function createSocketServer(deps: SocketServerDeps): {
 } {
     const configuration = getConfiguration()
     const corsOrigins = deps.corsOrigins ?? configuration.corsOrigins
+    const corsOriginPatterns = deps.corsOriginPatterns ?? []
     const allowAllOrigins = corsOrigins.includes('*')
-    const corsOriginOption = allowAllOrigins ? '*' : corsOrigins
+    const corsOriginOption = allowAllOrigins
+        ? '*'
+        : [...corsOrigins, ...corsOriginPatterns]
     const corsOptions = {
         origin: corsOriginOption,
         methods: ['GET', 'POST'],
@@ -73,7 +77,12 @@ export function createSocketServer(deps: SocketServerDeps): {
         maxHttpBufferSize: SOCKET_MAX_HTTP_BUFFER_SIZE,
         allowRequest: async (req) => {
             const origin = req.headers.get('origin')
-            if (!origin || allowAllOrigins || corsOrigins.includes(origin)) {
+            if (
+                !origin ||
+                allowAllOrigins ||
+                corsOrigins.includes(origin) ||
+                corsOriginPatterns.some((pattern) => pattern.test(origin))
+            ) {
                 return
             }
             throw 'Origin not allowed'
