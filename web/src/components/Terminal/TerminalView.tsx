@@ -82,7 +82,10 @@ export function TerminalView(props: {
             fontSize,
             theme: GHOSTTY_DEFAULT_THEME,
             convertEol: true,
-            customGlyphs: true
+            customGlyphs: true,
+            // zellij/tmux can enable terminal mouse reporting, which otherwise
+            // prevents xterm from creating a local selection on macOS.
+            macOptionClickForcesSelection: true
         })
 
         const fitAddon = new FitAddon()
@@ -133,9 +136,22 @@ export function TerminalView(props: {
         window.addEventListener('resize', scheduleSettledFit)
         document.addEventListener('fullscreenchange', scheduleSettledFit)
 
+        let copyRequestId = 0
+        let nativeCopyRequestId = -1
         let pasteRequestId = 0
         let nativePasteRequestId = -1
 
+        const handleNativeCopy = (event: ClipboardEvent) => {
+            const selection = terminal.getSelection()
+            if (!selection || !event.clipboardData) {
+                return
+            }
+            nativeCopyRequestId = copyRequestId
+            event.clipboardData.setData('text/plain', selection)
+            event.preventDefault()
+            event.stopPropagation()
+            terminal.focus()
+        }
         const handleNativePaste = (event: ClipboardEvent) => {
             const text = event.clipboardData?.getData('text/plain') ?? ''
             if (!text) {
@@ -147,6 +163,7 @@ export function TerminalView(props: {
             terminal.paste(text)
             terminal.focus()
         }
+        container.addEventListener('copy', handleNativeCopy, true)
         container.addEventListener('paste', handleNativePaste, true)
 
         terminal.attachCustomKeyEventHandler((event) => {
@@ -157,12 +174,25 @@ export function TerminalView(props: {
             if (isTerminalCopyShortcut(event)) {
                 const selection = terminal.getSelection()
                 if (selection) {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    void safeCopyToClipboard(selection).catch(() => {
-                        // The browser may deny clipboard access outside a secure
-                        // context. Keep the terminal usable if that happens.
-                    })
+                    const requestId = ++copyRequestId
+
+                    // Let the browser emit its native copy event first. That
+                    // event exposes clipboardData synchronously and works
+                    // without Clipboard API permission. Fall back only when
+                    // the browser does not emit one (for example, for
+                    // Ctrl-Shift-C in browsers that only recognize Cmd-C).
+                    window.setTimeout(() => {
+                        if (
+                            abortController.signal.aborted ||
+                            nativeCopyRequestId === requestId
+                        ) {
+                            return
+                        }
+                        void safeCopyToClipboard(selection).catch(() => {
+                            // Keep the terminal usable if clipboard access is
+                            // denied by the browser.
+                        })
+                    }, 0)
                 }
                 return false
             }
@@ -232,6 +262,7 @@ export function TerminalView(props: {
             observer.disconnect()
             window.removeEventListener('resize', scheduleSettledFit)
             document.removeEventListener('fullscreenchange', scheduleSettledFit)
+            container.removeEventListener('copy', handleNativeCopy, true)
             container.removeEventListener('paste', handleNativePaste, true)
             if (fitFrame !== null) {
                 cancelAnimationFrame(fitFrame)

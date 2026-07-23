@@ -153,6 +153,22 @@ describe('TerminalView resizing and copy behavior', () => {
         })
     })
 
+    it('writes an xterm selection through the native copy event', async () => {
+        const rendered = render(<TerminalView />)
+        terminalMocks.getSelection.mockReturnValue('native selected output')
+        const setData = vi.fn()
+        const copyEvent = new Event('copy', { bubbles: true, cancelable: true })
+        Object.defineProperty(copyEvent, 'clipboardData', {
+            value: { setData }
+        })
+
+        rendered.container.firstElementChild?.dispatchEvent(copyEvent)
+
+        expect(setData).toHaveBeenCalledWith('text/plain', 'native selected output')
+        expect(copyEvent.defaultPrevented).toBe(true)
+        expect(terminalMocks.focus).toHaveBeenCalled()
+    })
+
     it('pastes native clipboard data and falls back to clipboard readText', async () => {
         const readText = vi.fn(async () => 'fallback paste')
         Object.defineProperty(navigator, 'clipboard', {
@@ -225,5 +241,6 @@ describe('TerminalView resizing and copy behavior', () => {
             brightCyan: '#70c0b1',
             brightWhite: '#eaeaea',
         })
+        expect(terminalMocks.terminalOptions?.macOptionClickForcesSelection).toBe(true)
     })
 })
