@@ -214,6 +214,29 @@ describe('TerminalView resizing and copy behavior', () => {
         ).toBe(true)
     })
 
+    it('handles paste from the terminal container when xterm skips its key callback', async () => {
+        const readText = vi.fn(async () => 'container fallback paste')
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: { readText }
+        })
+        const rendered = render(<TerminalView />)
+
+        rendered.container.firstElementChild?.dispatchEvent(
+            new KeyboardEvent('keydown', {
+                key: 'v',
+                metaKey: true,
+                bubbles: true,
+                cancelable: true
+            })
+        )
+
+        await waitFor(() => {
+            expect(readText).toHaveBeenCalledTimes(1)
+            expect(terminalMocks.paste).toHaveBeenCalledWith('container fallback paste')
+        })
+    })
+
     it('uses the Ghostty default terminal palette', async () => {
         render(<TerminalView />)
 

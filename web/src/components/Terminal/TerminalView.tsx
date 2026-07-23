@@ -140,6 +140,7 @@ export function TerminalView(props: {
         let nativeCopyRequestId = -1
         let pasteRequestId = 0
         let nativePasteRequestId = -1
+        const handledClipboardKeyEvents = new WeakSet<KeyboardEvent>()
 
         const handleNativeCopy = (event: ClipboardEvent) => {
             const selection = terminal.getSelection()
@@ -163,47 +164,47 @@ export function TerminalView(props: {
             terminal.paste(text)
             terminal.focus()
         }
-        container.addEventListener('copy', handleNativeCopy, true)
-        container.addEventListener('paste', handleNativePaste, true)
-
-        terminal.attachCustomKeyEventHandler((event) => {
-            if (event.type !== 'keydown') {
-                return true
+        const handleClipboardShortcutKeyDown = (event: KeyboardEvent) => {
+            if (event.type !== 'keydown' || handledClipboardKeyEvents.has(event)) {
+                return
             }
 
             if (isTerminalCopyShortcut(event)) {
+                handledClipboardKeyEvents.add(event)
                 const selection = terminal.getSelection()
-                if (selection) {
-                    const requestId = ++copyRequestId
-
-                    // Let the browser emit its native copy event first. That
-                    // event exposes clipboardData synchronously and works
-                    // without Clipboard API permission. Fall back only when
-                    // the browser does not emit one (for example, for
-                    // Ctrl-Shift-C in browsers that only recognize Cmd-C).
-                    window.setTimeout(() => {
-                        if (
-                            abortController.signal.aborted ||
-                            nativeCopyRequestId === requestId
-                        ) {
-                            return
-                        }
-                        void safeCopyToClipboard(selection).catch(() => {
-                            // Keep the terminal usable if clipboard access is
-                            // denied by the browser.
-                        })
-                    }, 0)
+                if (!selection) {
+                    return
                 }
-                return false
+                const requestId = ++copyRequestId
+
+                // Let the browser emit its native copy event first. That
+                // event exposes clipboardData synchronously and works
+                // without Clipboard API permission. Fall back only when
+                // the browser does not emit one (for example, for
+                // Ctrl-Shift-C in browsers that only recognize Cmd-C).
+                window.setTimeout(() => {
+                    if (
+                        abortController.signal.aborted ||
+                        nativeCopyRequestId === requestId
+                    ) {
+                        return
+                    }
+                    void safeCopyToClipboard(selection).catch(() => {
+                        // Keep the terminal usable if clipboard access is
+                        // denied by the browser.
+                    })
+                }, 0)
+                return
             }
 
             if (isTerminalPasteShortcut(event)) {
+                handledClipboardKeyEvents.add(event)
                 const requestId = ++pasteRequestId
 
-                // Keep the browser's native paste action available. It carries
-                // clipboardData without requiring Clipboard API permission.
-                // If no paste event arrives, fall back to readText after the
-                // keydown default action has had a chance to run.
+                // Keep the browser's native paste action available. It
+                // carries clipboardData without requiring Clipboard API
+                // permission. If no paste event arrives, fall back to
+                // readText after the default action has had a chance to run.
                 window.setTimeout(() => {
                     if (
                         abortController.signal.aborted ||
@@ -221,6 +222,22 @@ export function TerminalView(props: {
                         // Native paste remains the permission-free fallback.
                     })
                 }, 0)
+            }
+        }
+        const handleContainerKeyDown = (event: KeyboardEvent) => {
+            handleClipboardShortcutKeyDown(event)
+        }
+        container.addEventListener('keydown', handleContainerKeyDown, true)
+        container.addEventListener('copy', handleNativeCopy, true)
+        container.addEventListener('paste', handleNativePaste, true)
+
+        terminal.attachCustomKeyEventHandler((event) => {
+            if (event.type !== 'keydown') {
+                return true
+            }
+
+            if (isTerminalCopyShortcut(event) || isTerminalPasteShortcut(event)) {
+                handleClipboardShortcutKeyDown(event)
                 return false
             }
 
@@ -262,6 +279,7 @@ export function TerminalView(props: {
             observer.disconnect()
             window.removeEventListener('resize', scheduleSettledFit)
             document.removeEventListener('fullscreenchange', scheduleSettledFit)
+            container.removeEventListener('keydown', handleContainerKeyDown, true)
             container.removeEventListener('copy', handleNativeCopy, true)
             container.removeEventListener('paste', handleNativePaste, true)
             if (fitFrame !== null) {
