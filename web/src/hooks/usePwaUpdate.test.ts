@@ -11,6 +11,11 @@ import {
 const registerSWMock = vi.fn()
 const serviceWorkerListeners = new Map<string, Set<EventListener>>()
 
+async function flushUpdateCheck(): Promise<void> {
+    await Promise.resolve()
+    await Promise.resolve()
+}
+
 vi.mock('virtual:pwa-register', () => ({
     registerSW: (options: Parameters<typeof registerSWMock>[0]) => registerSWMock(options),
 }))
@@ -41,42 +46,66 @@ describe('setupRegistrationUpdateChecks', () => {
         vi.useRealTimers()
     })
 
-    it('checks for updates on an hourly interval', () => {
+    it('checks immediately and then on a one-minute interval', async () => {
         const registration = {
             update: vi.fn().mockResolvedValue(undefined),
         } as unknown as ServiceWorkerRegistration
 
         const cleanup = setupRegistrationUpdateChecks(registration)
-
-        vi.advanceTimersByTime(PWA_UPDATE_CHECK_INTERVAL_MS)
         expect(registration.update).toHaveBeenCalledTimes(1)
+        await flushUpdateCheck()
 
         vi.advanceTimersByTime(PWA_UPDATE_CHECK_INTERVAL_MS)
         expect(registration.update).toHaveBeenCalledTimes(2)
+        await flushUpdateCheck()
+
+        vi.advanceTimersByTime(PWA_UPDATE_CHECK_INTERVAL_MS)
+        expect(registration.update).toHaveBeenCalledTimes(3)
 
         cleanup()
     })
 
-    it('checks for updates when the tab becomes visible', () => {
+    it('checks for updates when the tab becomes visible', async () => {
         const registration = {
             update: vi.fn().mockResolvedValue(undefined),
         } as unknown as ServiceWorkerRegistration
 
         const cleanup = setupRegistrationUpdateChecks(registration)
+        expect(registration.update).toHaveBeenCalledTimes(1)
+        await flushUpdateCheck()
 
         Object.defineProperty(document, 'visibilityState', {
             configurable: true,
             value: 'hidden',
         })
         document.dispatchEvent(new Event('visibilitychange'))
-        expect(registration.update).not.toHaveBeenCalled()
+        expect(registration.update).toHaveBeenCalledTimes(1)
 
         Object.defineProperty(document, 'visibilityState', {
             configurable: true,
             value: 'visible',
         })
         document.dispatchEvent(new Event('visibilitychange'))
+        expect(registration.update).toHaveBeenCalledTimes(2)
+
+        cleanup()
+    })
+
+    it('checks for updates when the window regains focus or connectivity', async () => {
+        const registration = {
+            update: vi.fn().mockResolvedValue(undefined),
+        } as unknown as ServiceWorkerRegistration
+
+        const cleanup = setupRegistrationUpdateChecks(registration)
         expect(registration.update).toHaveBeenCalledTimes(1)
+        await flushUpdateCheck()
+
+        window.dispatchEvent(new Event('focus'))
+        expect(registration.update).toHaveBeenCalledTimes(2)
+        await flushUpdateCheck()
+
+        window.dispatchEvent(new Event('online'))
+        expect(registration.update).toHaveBeenCalledTimes(3)
 
         cleanup()
     })
@@ -86,13 +115,41 @@ describe('setupRegistrationUpdateChecks', () => {
             update: vi.fn().mockResolvedValue(undefined),
         } as unknown as ServiceWorkerRegistration
         const removeEventListenerSpy = vi.spyOn(document, 'removeEventListener')
+        const removeWindowEventListenerSpy = vi.spyOn(window, 'removeEventListener')
         const clearIntervalSpy = vi.spyOn(window, 'clearInterval')
 
         const cleanup = setupRegistrationUpdateChecks(registration)
         cleanup()
 
         expect(removeEventListenerSpy).toHaveBeenCalledWith('visibilitychange', expect.any(Function))
+        expect(removeWindowEventListenerSpy).toHaveBeenCalledWith('focus', expect.any(Function))
+        expect(removeWindowEventListenerSpy).toHaveBeenCalledWith('online', expect.any(Function))
         expect(clearIntervalSpy).toHaveBeenCalled()
+    })
+
+    it('coalesces overlapping update checks', async () => {
+        let finishUpdate: (() => void) | undefined
+        const registration = {
+            update: vi.fn(() => new Promise<void>((resolve) => {
+                finishUpdate = resolve
+            })),
+        } as unknown as ServiceWorkerRegistration
+
+        const cleanup = setupRegistrationUpdateChecks(registration)
+        expect(registration.update).toHaveBeenCalledTimes(1)
+
+        window.dispatchEvent(new Event('focus'))
+        window.dispatchEvent(new Event('online'))
+        vi.advanceTimersByTime(PWA_UPDATE_CHECK_INTERVAL_MS)
+        expect(registration.update).toHaveBeenCalledTimes(1)
+
+        finishUpdate?.()
+        await flushUpdateCheck()
+
+        window.dispatchEvent(new Event('focus'))
+        expect(registration.update).toHaveBeenCalledTimes(2)
+
+        cleanup()
     })
 })
 
@@ -209,7 +266,7 @@ describe('usePwaUpdate', () => {
         expect(result.current.needRefresh).toBe(true)
     })
 
-    it('wires registration update checks from onRegistered', () => {
+    it('wires registration update checks from onRegistered', async () => {
         vi.useFakeTimers()
 
         const registration = {
@@ -222,8 +279,10 @@ describe('usePwaUpdate', () => {
             capturedOptions.onRegistered?.(registration)
         })
 
-        vi.advanceTimersByTime(PWA_UPDATE_CHECK_INTERVAL_MS)
         expect(registration.update).toHaveBeenCalledTimes(1)
+        await flushUpdateCheck()
+        vi.advanceTimersByTime(PWA_UPDATE_CHECK_INTERVAL_MS)
+        expect(registration.update).toHaveBeenCalledTimes(2)
 
         vi.useRealTimers()
     })

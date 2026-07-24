@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { registerSW } from 'virtual:pwa-register'
 
-export const PWA_UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000
+export const PWA_UPDATE_CHECK_INTERVAL_MS = 60 * 1000
 export const PWA_UPDATE_RELOAD_FALLBACK_MS = 2000
 
 export async function requestPwaUpdateReload(
@@ -60,21 +60,38 @@ export async function requestPwaUpdateReload(
 export function setupRegistrationUpdateChecks(
     registration: ServiceWorkerRegistration,
 ): () => void {
-    const intervalId = window.setInterval(() => {
-        void registration.update()
-    }, PWA_UPDATE_CHECK_INTERVAL_MS)
+    let updateInFlight = false
+    const checkForUpdate = () => {
+        if (updateInFlight) {
+            return
+        }
+
+        updateInFlight = true
+        void registration.update().catch((error) => {
+            console.error('SW update check failed', error)
+        }).finally(() => {
+            updateInFlight = false
+        })
+    }
+
+    checkForUpdate()
+    const intervalId = window.setInterval(checkForUpdate, PWA_UPDATE_CHECK_INTERVAL_MS)
 
     const handleVisibilityChange = () => {
         if (document.visibilityState === 'visible') {
-            void registration.update()
+            checkForUpdate()
         }
     }
 
     document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('focus', checkForUpdate)
+    window.addEventListener('online', checkForUpdate)
 
     return () => {
         window.clearInterval(intervalId)
         document.removeEventListener('visibilitychange', handleVisibilityChange)
+        window.removeEventListener('focus', checkForUpdate)
+        window.removeEventListener('online', checkForUpdate)
     }
 }
 
