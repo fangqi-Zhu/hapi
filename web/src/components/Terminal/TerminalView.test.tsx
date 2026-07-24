@@ -16,6 +16,11 @@ const terminalMocks = vi.hoisted(() => ({
     focus: vi.fn(),
     refresh: vi.fn(),
     terminalOptions: null as Record<string, unknown> | null,
+    webglConstructorError: null as Error | null,
+    webglContextLossCallback: null as (() => void) | null,
+    webglContextLossDispose: vi.fn(),
+    webglDispose: vi.fn(),
+    webglClearTextureAtlas: vi.fn(),
 }))
 
 vi.mock('@xterm/xterm', () => ({
@@ -74,6 +79,24 @@ vi.mock('@xterm/addon-web-links', () => ({
     }
 }))
 
+vi.mock('@xterm/addon-webgl', () => ({
+    WebglAddon: class {
+        constructor() {
+            if (terminalMocks.webglConstructorError) {
+                throw terminalMocks.webglConstructorError
+            }
+        }
+
+        onContextLoss(callback: () => void) {
+            terminalMocks.webglContextLossCallback = callback
+            return { dispose: terminalMocks.webglContextLossDispose }
+        }
+
+        dispose = terminalMocks.webglDispose
+        clearTextureAtlas = terminalMocks.webglClearTextureAtlas
+    }
+}))
+
 vi.mock('@/lib/terminalFont', () => ({
     ensureBuiltinFontLoaded: vi.fn(async () => false),
     getFontProvider: () => ({
@@ -103,6 +126,8 @@ describe('TerminalView resizing and copy behavior', () => {
         terminalMocks.resizeObserverCallback = null
         terminalMocks.writeParsedCallback = null
         terminalMocks.terminalOptions = null
+        terminalMocks.webglConstructorError = null
+        terminalMocks.webglContextLossCallback = null
         terminalMocks.hasSelection.mockReturnValue(false)
         terminalMocks.getSelection.mockReturnValue('')
         vi.stubGlobal('ResizeObserver', ResizeObserverMock)
@@ -179,6 +204,37 @@ describe('TerminalView resizing and copy behavior', () => {
                 refreshCountAfterWrite
             )
         })
+    })
+
+    it('uses WebGL cell-grid rendering and falls back after context loss', async () => {
+        render(<TerminalView />)
+
+        await waitFor(() => {
+            expect(terminalMocks.webglContextLossCallback).not.toBeNull()
+        })
+        const refreshCount = terminalMocks.refresh.mock.calls.length
+
+        act(() => {
+            terminalMocks.webglContextLossCallback?.()
+        })
+
+        expect(terminalMocks.webglContextLossDispose).toHaveBeenCalled()
+        expect(terminalMocks.webglDispose).toHaveBeenCalled()
+        await waitFor(() => {
+            expect(terminalMocks.refresh.mock.calls.length).toBeGreaterThan(refreshCount)
+        })
+    })
+
+    it('keeps the DOM fallback usable when WebGL is unavailable', async () => {
+        terminalMocks.webglConstructorError = new Error('WebGL2 unavailable')
+        const onResize = vi.fn()
+
+        render(<TerminalView onResize={onResize} />)
+
+        await waitFor(() => {
+            expect(onResize).toHaveBeenCalledWith(120, 40)
+        })
+        expect(terminalMocks.webglContextLossCallback).toBeNull()
     })
 
     it('copies with Cmd-C and Ctrl-Shift-C while preserving plain Ctrl-C', async () => {

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import { ensureBuiltinFontLoaded, getFontProvider } from '@/lib/terminalFont'
 import { getInitialTerminalFontSize } from '@/hooks/useTerminalFontSize'
@@ -131,6 +132,8 @@ export function TerminalView(props: {
         let resizeReportTimer: number | null = null
         let writeRefreshTimer: number | null = null
         let lastReportedSize: { cols: number; rows: number } | null = null
+        let webglAddon: WebglAddon | null = null
+        let webglContextLossDisposable: { dispose: () => void } | null = null
 
         const refreshTerminal = () => {
             if (abortController.signal.aborted || terminal.rows <= 0) return
@@ -153,6 +156,31 @@ export function TerminalView(props: {
                 writeRefreshTimer = null
                 scheduleRefresh()
             }, WRITE_REFRESH_DELAY_MS)
+        }
+
+        // The DOM renderer lays each styled run out as an inline span. With
+        // CJK fallback fonts, subpixel width corrections can accumulate across
+        // a row and visibly push fixed-column zellij/tmux borders sideways.
+        // WebGL places every glyph directly on the terminal cell grid instead.
+        // Fall back to DOM when WebGL2 is unavailable or its context is lost.
+        try {
+            const addon = new WebglAddon()
+            webglAddon = addon
+            webglContextLossDisposable = addon.onContextLoss(() => {
+                webglContextLossDisposable?.dispose()
+                webglContextLossDisposable = null
+                addon.dispose()
+                if (webglAddon === addon) {
+                    webglAddon = null
+                }
+                scheduleRefresh()
+            })
+            terminal.loadAddon(addon)
+        } catch {
+            webglContextLossDisposable?.dispose()
+            webglContextLossDisposable = null
+            webglAddon?.dispose()
+            webglAddon = null
         }
 
         const reportTerminalSize = () => {
@@ -334,21 +362,24 @@ export function TerminalView(props: {
         const refreshFont = (forceRemeasure = false) => {
             if (abortController.signal.aborted) return
             const nextFamily = fontProvider.getFontFamily()
+            const refreshRendererFont = () => {
+                webglAddon?.clearTextureAtlas()
+                scheduleRefresh()
+                scheduleFit()
+            }
 
             if (forceRemeasure && terminal.options.fontFamily === nextFamily) {
                 terminal.options.fontFamily = `${nextFamily}, "__hapi_font_refresh__"`
                 requestAnimationFrame(() => {
                     if (abortController.signal.aborted) return
                     terminal.options.fontFamily = nextFamily
-                    scheduleRefresh()
-                    scheduleFit()
+                    refreshRendererFont()
                 })
                 return
             }
 
             terminal.options.fontFamily = nextFamily
-            scheduleRefresh()
-            scheduleFit()
+            refreshRendererFont()
         }
 
         void ensureBuiltinFontLoaded().then(loaded => {
@@ -383,6 +414,8 @@ export function TerminalView(props: {
             }
             fitAddon.dispose()
             webLinksAddon.dispose()
+            webglContextLossDisposable?.dispose()
+            webglAddon?.dispose()
             writeParsedDisposable.dispose()
             osc52Disposable.dispose()
             terminal.dispose()
