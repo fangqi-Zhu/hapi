@@ -78,7 +78,10 @@ export class TunnelManager {
     private retryTimeout: ReturnType<typeof setTimeout> | null = null
     private stopped = false
 
-    constructor(config: TunnelConfig) {
+    constructor(
+        config: TunnelConfig,
+        private readonly spawnProcess: typeof spawn = spawn
+    ) {
         this.config = config
         this.state = {
             process: null,
@@ -124,7 +127,7 @@ export class TunnelManager {
         return new Promise((resolve, reject) => {
             console.log(`[Tunnel] Starting tunnel to ${forwardUrl}...`)
 
-            const proc = spawn({
+            const proc = this.spawnProcess({
                 cmd: [tunwgPath, '--json', `--forward=${forwardUrl}`],
                 env,
                 stdout: 'pipe',
@@ -137,6 +140,24 @@ export class TunnelManager {
             let stdoutBuffer = ''
 
             let resolved = false
+            let restartRequested = false
+            const handleTunwgLog = (message: string): void => {
+                console.log(`[Tunnel] ${message}`)
+                if (
+                    !this.stopped &&
+                    !restartRequested &&
+                    this.state.process === proc &&
+                    message.includes('client relay error:')
+                ) {
+                    restartRequested = true
+                    console.log('[Tunnel] Relay connection failed; restarting tunnel process.')
+                    try {
+                        proc.kill()
+                    } catch (error) {
+                        console.error('[Tunnel] Failed to stop unhealthy tunnel process:', error)
+                    }
+                }
+            }
 
             const readStdout = async (): Promise<void> => {
                 const reader = proc.stdout.getReader()
@@ -169,7 +190,7 @@ export class TunnelManager {
                                 continue
                             }
 
-                            console.log(`[Tunnel] ${trimmed}`)
+                            handleTunwgLog(trimmed)
                         }
                     }
                 } catch (err) {
@@ -196,7 +217,7 @@ export class TunnelManager {
                         for (const line of lines) {
                             const trimmed = line.trim()
                             if (trimmed) {
-                                console.log(`[Tunnel] ${trimmed}`)
+                                handleTunwgLog(trimmed)
                             }
                         }
                     }
@@ -221,8 +242,10 @@ export class TunnelManager {
                     return
                 }
 
-                if (exitCode !== 0) {
-                    this.state.lastError = `tunwg exited with code ${exitCode}`
+                if (exitCode !== 0 || restartRequested) {
+                    this.state.lastError = restartRequested
+                        ? 'tunwg relay connection failed'
+                        : `tunwg exited with code ${exitCode}`
                     console.error(`[Tunnel] ${this.state.lastError}`)
 
                     // Reject the promise immediately if we haven't got a URL yet
