@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
-import { CanvasAddon } from '@xterm/addon-canvas'
 import '@xterm/xterm/css/xterm.css'
 import { ensureBuiltinFontLoaded, getFontProvider } from '@/lib/terminalFont'
 import { getInitialTerminalFontSize } from '@/hooks/useTerminalFontSize'
@@ -34,6 +33,8 @@ const GHOSTTY_DEFAULT_THEME = {
 }
 
 const MAX_OSC52_BASE64_LENGTH = 4 * 1024 * 1024
+const RESIZE_REPORT_DELAY_MS = 80
+const WRITE_REFRESH_DELAY_MS = 50
 
 function decodeOsc52Clipboard(data: string): string | null {
     const separator = data.indexOf(';')
@@ -120,19 +121,70 @@ export function TerminalView(props: {
 
         const fitAddon = new FitAddon()
         const webLinksAddon = new WebLinksAddon()
-        const canvasAddon = new CanvasAddon()
         terminal.loadAddon(fitAddon)
         terminal.loadAddon(webLinksAddon)
-        terminal.loadAddon(canvasAddon)
         terminal.open(container)
 
         let fitFrame: number | null = null
         let settleFrame: number | null = null
+        let refreshFrame: number | null = null
+        let resizeReportTimer: number | null = null
+        let writeRefreshTimer: number | null = null
+        let lastReportedSize: { cols: number; rows: number } | null = null
+
+        const refreshTerminal = () => {
+            if (abortController.signal.aborted || terminal.rows <= 0) return
+            terminal.refresh(0, terminal.rows - 1)
+        }
+
+        const scheduleRefresh = () => {
+            if (refreshFrame !== null || abortController.signal.aborted) return
+            refreshFrame = requestAnimationFrame(() => {
+                refreshFrame = null
+                refreshTerminal()
+            })
+        }
+
+        const scheduleWriteRefresh = () => {
+            if (writeRefreshTimer !== null) {
+                window.clearTimeout(writeRefreshTimer)
+            }
+            writeRefreshTimer = window.setTimeout(() => {
+                writeRefreshTimer = null
+                scheduleRefresh()
+            }, WRITE_REFRESH_DELAY_MS)
+        }
+
+        const reportTerminalSize = () => {
+            if (abortController.signal.aborted) return
+            const nextSize = { cols: terminal.cols, rows: terminal.rows }
+            if (
+                lastReportedSize?.cols === nextSize.cols &&
+                lastReportedSize.rows === nextSize.rows
+            ) {
+                return
+            }
+            const onResize = onResizeRef.current
+            if (!onResize) return
+            lastReportedSize = nextSize
+            onResize(nextSize.cols, nextSize.rows)
+        }
+
+        const scheduleResizeReport = () => {
+            if (resizeReportTimer !== null) {
+                window.clearTimeout(resizeReportTimer)
+            }
+            resizeReportTimer = window.setTimeout(() => {
+                resizeReportTimer = null
+                reportTerminalSize()
+            }, RESIZE_REPORT_DELAY_MS)
+        }
 
         const fitTerminal = () => {
             if (abortController.signal.aborted) return
             fitAddon.fit()
-            onResizeRef.current?.(terminal.cols, terminal.rows)
+            scheduleResizeReport()
+            scheduleRefresh()
         }
 
         const scheduleFit = () => {
@@ -164,7 +216,19 @@ export function TerminalView(props: {
         const observer = new ResizeObserver(scheduleFit)
         observer.observe(container)
         window.addEventListener('resize', scheduleSettledFit)
+        window.addEventListener('focus', scheduleSettledFit)
         document.addEventListener('fullscreenchange', scheduleSettledFit)
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                scheduleSettledFit()
+            }
+        }
+        document.addEventListener('visibilitychange', handleVisibilityChange)
+
+        // xterm parses terminal writes asynchronously. Redraw after a short
+        // quiet period so a stale frame cannot survive a zellij/tmux tab switch
+        // or alternate-screen redraw without repainting every row each frame.
+        const writeParsedDisposable = terminal.onWriteParsed(scheduleWriteRefresh)
 
         let copyRequestId = 0
         let nativeCopyRequestId = -1
@@ -299,18 +363,14 @@ export function TerminalView(props: {
                 requestAnimationFrame(() => {
                     if (abortController.signal.aborted) return
                     terminal.options.fontFamily = nextFamily
-                    if (terminal.rows > 0) {
-                        terminal.refresh(0, terminal.rows - 1)
-                    }
+                    scheduleRefresh()
                     scheduleFit()
                 })
                 return
             }
 
             terminal.options.fontFamily = nextFamily
-            if (terminal.rows > 0) {
-                terminal.refresh(0, terminal.rows - 1)
-            }
+            scheduleRefresh()
             scheduleFit()
         }
 
@@ -323,7 +383,9 @@ export function TerminalView(props: {
         abortController.signal.addEventListener('abort', () => {
             observer.disconnect()
             window.removeEventListener('resize', scheduleSettledFit)
+            window.removeEventListener('focus', scheduleSettledFit)
             document.removeEventListener('fullscreenchange', scheduleSettledFit)
+            document.removeEventListener('visibilitychange', handleVisibilityChange)
             container.removeEventListener('keydown', handleContainerKeyDown, true)
             container.removeEventListener('copy', handleNativeCopy, true)
             container.removeEventListener('paste', handleNativePaste, true)
@@ -333,9 +395,18 @@ export function TerminalView(props: {
             if (settleFrame !== null) {
                 cancelAnimationFrame(settleFrame)
             }
+            if (refreshFrame !== null) {
+                cancelAnimationFrame(refreshFrame)
+            }
+            if (resizeReportTimer !== null) {
+                window.clearTimeout(resizeReportTimer)
+            }
+            if (writeRefreshTimer !== null) {
+                window.clearTimeout(writeRefreshTimer)
+            }
             fitAddon.dispose()
             webLinksAddon.dispose()
-            canvasAddon.dispose()
+            writeParsedDisposable.dispose()
             osc52Disposable.dispose()
             terminal.dispose()
         })

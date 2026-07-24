@@ -5,6 +5,8 @@ import { TerminalView } from './TerminalView'
 const terminalMocks = vi.hoisted(() => ({
     fit: vi.fn(),
     resizeObserverCallback: null as ResizeObserverCallback | null,
+    writeParsedCallback: null as (() => void) | null,
+    writeParsedDispose: vi.fn(),
     keyHandler: null as ((event: KeyboardEvent) => boolean) | null,
     oscHandler: null as ((data: string) => boolean | Promise<boolean>) | null,
     oscDispose: vi.fn(),
@@ -12,6 +14,7 @@ const terminalMocks = vi.hoisted(() => ({
     getSelection: vi.fn(() => ''),
     paste: vi.fn(),
     focus: vi.fn(),
+    refresh: vi.fn(),
     terminalOptions: null as Record<string, unknown> | null,
 }))
 
@@ -29,7 +32,7 @@ vi.mock('@xterm/xterm', () => ({
         loadAddon = vi.fn()
         open = vi.fn()
         write = vi.fn()
-        refresh = vi.fn()
+        refresh = terminalMocks.refresh
         dispose = vi.fn()
         hasSelection = terminalMocks.hasSelection
         getSelection = terminalMocks.getSelection
@@ -50,6 +53,11 @@ vi.mock('@xterm/xterm', () => ({
         attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {
             terminalMocks.keyHandler = handler
         }
+
+        onWriteParsed(handler: () => void) {
+            terminalMocks.writeParsedCallback = handler
+            return { dispose: terminalMocks.writeParsedDispose }
+        }
     }
 }))
 
@@ -62,12 +70,6 @@ vi.mock('@xterm/addon-fit', () => ({
 
 vi.mock('@xterm/addon-web-links', () => ({
     WebLinksAddon: class {
-        dispose = vi.fn()
-    }
-}))
-
-vi.mock('@xterm/addon-canvas', () => ({
-    CanvasAddon: class {
         dispose = vi.fn()
     }
 }))
@@ -99,6 +101,7 @@ describe('TerminalView resizing and copy behavior', () => {
         terminalMocks.keyHandler = null
         terminalMocks.oscHandler = null
         terminalMocks.resizeObserverCallback = null
+        terminalMocks.writeParsedCallback = null
         terminalMocks.terminalOptions = null
         terminalMocks.hasSelection.mockReturnValue(false)
         terminalMocks.getSelection.mockReturnValue('')
@@ -125,6 +128,56 @@ describe('TerminalView resizing and copy behavior', () => {
 
         await waitFor(() => {
             expect(terminalMocks.fit.mock.calls.length).toBeGreaterThan(fitCount)
+        })
+    })
+
+    it('deduplicates unchanged PTY resize reports', async () => {
+        const onResize = vi.fn()
+        render(<TerminalView onResize={onResize} />)
+
+        await waitFor(() => {
+            expect(onResize).toHaveBeenCalledTimes(1)
+        })
+
+        act(() => {
+            terminalMocks.resizeObserverCallback?.([], {} as ResizeObserver)
+            window.dispatchEvent(new Event('resize'))
+        })
+
+        await new Promise((resolve) => window.setTimeout(resolve, 150))
+        expect(onResize).toHaveBeenCalledTimes(1)
+    })
+
+    it('fully refreshes after parsed output and when the page becomes visible', async () => {
+        render(<TerminalView />)
+
+        await waitFor(() => {
+            expect(terminalMocks.writeParsedCallback).not.toBeNull()
+            expect(terminalMocks.refresh).toHaveBeenCalled()
+        })
+        const refreshCountAfterMount = terminalMocks.refresh.mock.calls.length
+
+        act(() => {
+            terminalMocks.writeParsedCallback?.()
+        })
+
+        await waitFor(() => {
+            expect(terminalMocks.refresh.mock.calls.length).toBeGreaterThan(
+                refreshCountAfterMount
+            )
+        })
+        const refreshCountAfterWrite = terminalMocks.refresh.mock.calls.length
+        const fitCountAfterWrite = terminalMocks.fit.mock.calls.length
+
+        act(() => {
+            document.dispatchEvent(new Event('visibilitychange'))
+        })
+
+        await waitFor(() => {
+            expect(terminalMocks.fit.mock.calls.length).toBeGreaterThan(fitCountAfterWrite)
+            expect(terminalMocks.refresh.mock.calls.length).toBeGreaterThan(
+                refreshCountAfterWrite
+            )
         })
     })
 
