@@ -48,6 +48,19 @@ function ConnectionIndicator(props: { status: 'idle' | 'connecting' | 'connected
 
 const EXIT_NAVIGATION_DELAY_MS = 700
 
+type KeyboardLockApi = {
+    lock: (keyCodes?: string[]) => Promise<void>
+    unlock: () => void
+}
+
+function getKeyboardLockApi(): KeyboardLockApi | null {
+    const keyboard = (navigator as Navigator & { keyboard?: Partial<KeyboardLockApi> }).keyboard
+    if (typeof keyboard?.lock !== 'function' || typeof keyboard.unlock !== 'function') {
+        return null
+    }
+    return keyboard as KeyboardLockApi
+}
+
 export default function TerminalPage() {
     const { t } = useTranslation()
     const { sessionId } = useParams({ from: '/sessions/$sessionId/terminal' })
@@ -101,13 +114,35 @@ export default function TerminalPage() {
     }, [onExit, goBack])
 
     useEffect(() => {
+        const keyboard = getKeyboardLockApi()
+        let escapeLockRequested = false
+
+        const unlockEscape = () => {
+            if (!keyboard || !escapeLockRequested) {
+                return
+            }
+            escapeLockRequested = false
+            keyboard.unlock()
+        }
+
         const handleFullscreenChange = () => {
-            setIsFullscreen(document.fullscreenElement === pageRef.current)
+            const pageIsFullscreen = document.fullscreenElement === pageRef.current
+            setIsFullscreen(pageIsFullscreen)
+
+            if (pageIsFullscreen && keyboard && !escapeLockRequested) {
+                escapeLockRequested = true
+                void keyboard.lock(['Escape']).catch(() => {
+                    escapeLockRequested = false
+                })
+            } else if (!pageIsFullscreen) {
+                unlockEscape()
+            }
         }
         document.addEventListener('fullscreenchange', handleFullscreenChange)
         handleFullscreenChange()
         return () => {
             document.removeEventListener('fullscreenchange', handleFullscreenChange)
+            unlockEscape()
         }
     }, [])
 

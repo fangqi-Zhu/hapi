@@ -116,6 +116,8 @@ describe('TerminalPage fullscreen behavior', () => {
 
     it('enters and exits fullscreen from the terminal header', async () => {
         let fullscreenElement: Element | null = null
+        const keyboardLock = vi.fn(async () => {})
+        const keyboardUnlock = vi.fn()
         const requestFullscreen = vi.fn(async function (this: HTMLElement) {
             fullscreenElement = this
             document.dispatchEvent(new Event('fullscreenchange'))
@@ -137,18 +139,30 @@ describe('TerminalPage fullscreen behavior', () => {
             configurable: true,
             value: exitFullscreen,
         })
+        Object.defineProperty(navigator, 'keyboard', {
+            configurable: true,
+            value: {
+                lock: keyboardLock,
+                unlock: keyboardUnlock,
+            },
+        })
 
         renderWithProviders()
 
         fireEvent.click(screen.getByRole('button', { name: 'Enter full screen' }))
         await waitFor(() => {
             expect(requestFullscreen).toHaveBeenCalledTimes(1)
+            expect(keyboardLock).toHaveBeenCalledWith(['Escape'])
             expect(screen.getByRole('button', { name: 'Exit full screen' })).toBeInTheDocument()
         })
+
+        fireEvent.keyDown(screen.getByTestId('terminal-page'), { key: 'Escape' })
+        expect(exitFullscreen).not.toHaveBeenCalled()
 
         fireEvent.click(screen.getByRole('button', { name: 'Exit full screen' }))
         await waitFor(() => {
             expect(exitFullscreen).toHaveBeenCalledTimes(1)
+            expect(keyboardUnlock).toHaveBeenCalledTimes(1)
             expect(screen.getByRole('button', { name: 'Enter full screen' })).toBeInTheDocument()
         })
     })
