@@ -262,8 +262,8 @@ describe('TerminalView resizing and copy behavior', () => {
         expect(copyEvent.defaultPrevented).toBe(true)
     })
 
-    it('pastes native clipboard data and falls back to clipboard readText', async () => {
-        const readText = vi.fn(async () => 'fallback paste')
+    it('pastes each native clipboard event exactly once', async () => {
+        const readText = vi.fn(async () => 'must not be used')
         Object.defineProperty(navigator, 'clipboard', {
             configurable: true,
             value: { readText }
@@ -295,10 +295,14 @@ describe('TerminalView resizing and copy behavior', () => {
                 new KeyboardEvent('keydown', { key: 'v', ctrlKey: true, shiftKey: true })
             )
         ).toBe(false)
-        await waitFor(() => {
-            expect(readText).toHaveBeenCalledTimes(1)
-            expect(terminalMocks.paste).toHaveBeenCalledWith('fallback paste')
+        const secondPasteEvent = new Event('paste', { bubbles: true, cancelable: true })
+        Object.defineProperty(secondPasteEvent, 'clipboardData', {
+            value: { getData: () => 'second native paste' }
         })
+        rendered.container.firstElementChild?.dispatchEvent(secondPasteEvent)
+
+        expect(terminalMocks.paste).toHaveBeenNthCalledWith(2, 'second native paste')
+        expect(readText).not.toHaveBeenCalled()
 
         expect(
             terminalMocks.keyHandler?.(
@@ -307,8 +311,8 @@ describe('TerminalView resizing and copy behavior', () => {
         ).toBe(true)
     })
 
-    it('handles paste from the terminal container when xterm skips its key callback', async () => {
-        const readText = vi.fn(async () => 'container fallback paste')
+    it('waits for native paste when xterm skips its key callback', async () => {
+        const readText = vi.fn(async () => 'must not be used')
         Object.defineProperty(navigator, 'clipboard', {
             configurable: true,
             value: { readText }
@@ -324,10 +328,50 @@ describe('TerminalView resizing and copy behavior', () => {
             })
         )
 
-        await waitFor(() => {
-            expect(readText).toHaveBeenCalledTimes(1)
-            expect(terminalMocks.paste).toHaveBeenCalledWith('container fallback paste')
+        await new Promise((resolve) => window.setTimeout(resolve, 0))
+        expect(readText).not.toHaveBeenCalled()
+        expect(terminalMocks.paste).not.toHaveBeenCalled()
+
+        const pasteEvent = new Event('paste', { bubbles: true, cancelable: true })
+        Object.defineProperty(pasteEvent, 'clipboardData', {
+            value: { getData: () => 'container native paste' }
         })
+        rendered.container.firstElementChild?.dispatchEvent(pasteEvent)
+
+        expect(terminalMocks.paste).toHaveBeenCalledTimes(1)
+        expect(terminalMocks.paste).toHaveBeenCalledWith('container native paste')
+    })
+
+    it('does not paste twice when the native paste event arrives after the shortcut', async () => {
+        const text = 'paste exactly once'
+        const readText = vi.fn(async () => text)
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: { readText }
+        })
+        const rendered = render(<TerminalView />)
+
+        await waitFor(() => {
+            expect(terminalMocks.keyHandler).not.toBeNull()
+        })
+
+        expect(
+            terminalMocks.keyHandler?.(
+                new KeyboardEvent('keydown', { key: 'v', metaKey: true })
+            )
+        ).toBe(false)
+        await new Promise((resolve) => window.setTimeout(resolve, 0))
+        expect(readText).not.toHaveBeenCalled()
+        expect(terminalMocks.paste).not.toHaveBeenCalled()
+
+        const pasteEvent = new Event('paste', { bubbles: true, cancelable: true })
+        Object.defineProperty(pasteEvent, 'clipboardData', {
+            value: { getData: () => text }
+        })
+        rendered.container.firstElementChild?.dispatchEvent(pasteEvent)
+
+        expect(terminalMocks.paste).toHaveBeenCalledTimes(1)
+        expect(terminalMocks.paste).toHaveBeenCalledWith(text)
     })
 
     it('uses the Ghostty default terminal palette', async () => {

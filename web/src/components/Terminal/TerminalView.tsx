@@ -232,8 +232,6 @@ export function TerminalView(props: {
 
         let copyRequestId = 0
         let nativeCopyRequestId = -1
-        let pasteRequestId = 0
-        let nativePasteRequestId = -1
         let remoteClipboardText = ''
         const handledClipboardKeyEvents = new WeakSet<KeyboardEvent>()
         const getCopyText = () => terminal.getSelection() || remoteClipboardText
@@ -267,9 +265,8 @@ export function TerminalView(props: {
             if (!text) {
                 return
             }
-            nativePasteRequestId = pasteRequestId
             event.preventDefault()
-            event.stopPropagation()
+            event.stopImmediatePropagation()
             terminal.paste(text)
             terminal.focus()
         }
@@ -305,33 +302,6 @@ export function TerminalView(props: {
                 }, 0)
                 return
             }
-
-            if (isTerminalPasteShortcut(event)) {
-                handledClipboardKeyEvents.add(event)
-                const requestId = ++pasteRequestId
-
-                // Keep the browser's native paste action available. It
-                // carries clipboardData without requiring Clipboard API
-                // permission. If no paste event arrives, fall back to
-                // readText after the default action has had a chance to run.
-                window.setTimeout(() => {
-                    if (
-                        abortController.signal.aborted ||
-                        nativePasteRequestId === requestId ||
-                        !navigator.clipboard?.readText
-                    ) {
-                        return
-                    }
-                    void navigator.clipboard.readText().then((text) => {
-                        if (!abortController.signal.aborted && text) {
-                            terminal.paste(text)
-                            terminal.focus()
-                        }
-                    }).catch(() => {
-                        // Native paste remains the permission-free fallback.
-                    })
-                }, 0)
-            }
         }
         const handleContainerKeyDown = (event: KeyboardEvent) => {
             handleClipboardShortcutKeyDown(event)
@@ -345,8 +315,15 @@ export function TerminalView(props: {
                 return true
             }
 
-            if (isTerminalCopyShortcut(event) || isTerminalPasteShortcut(event)) {
+            if (isTerminalCopyShortcut(event)) {
                 handleClipboardShortcutKeyDown(event)
+                return false
+            }
+
+            // The browser's native paste event is the single owner of paste
+            // data. Reading navigator.clipboard here races that event and can
+            // insert the same text twice.
+            if (isTerminalPasteShortcut(event)) {
                 return false
             }
 
